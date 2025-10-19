@@ -43,6 +43,7 @@ async fn main_impl() -> Result<i32> {
 
     helix_loader::initialize_config_file(args.config_file.clone());
     helix_loader::initialize_log_file(args.log_file.clone());
+    helix_loader::trust_db::initialize_trust_db();
 
     // Help has a higher priority and should be handled separately.
     if args.display_help {
@@ -117,8 +118,11 @@ FLAGS:
             Config::default()
         }
     };
-    let use_local_config = config.load_workspace_config == LoadWorkspaceConfig::Always;
-
+    let use_local_config = if config.load_workspace_config == LoadWorkspaceConfig::Trusted {
+        helix_loader::config::is_local_lang_config_trusted()?
+    } else {
+        config.load_workspace_config == LoadWorkspaceConfig::Always
+    };
     if args.health {
         if let Err(err) = helix_term::health::print_health(args.health_arg, use_local_config) {
             // Piping to for example `head -10` requires special handling:

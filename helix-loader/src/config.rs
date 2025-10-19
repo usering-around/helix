@@ -1,10 +1,18 @@
 use std::str::from_utf8;
 
+use crate::{trust_db, workspace_languages_file};
+
 /// Default built-in languages.toml.
 pub fn default_lang_config() -> toml::Value {
     let default_config = include_bytes!("../../languages.toml");
     toml::from_str(from_utf8(default_config).unwrap())
         .expect("Could not parse built-in languages.toml to valid toml")
+}
+
+pub fn is_local_lang_config_trusted() -> std::io::Result<bool> {
+    let path = workspace_languages_file();
+    let contents = std::fs::read_to_string(&path)?;
+    trust_db::is_file_trusted(&path, contents.as_bytes())
 }
 
 /// User configured languages.toml file, merged with the default config.

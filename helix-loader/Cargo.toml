@@ -32,3 +32,5 @@ threadpool = { version = "1.0" }
 tempfile.workspace = true
 
 tree-house.workspace = true
+sha2 = "0.10.9"
+fs2 = "0.4.3"

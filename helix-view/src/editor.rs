@@ -1603,6 +1603,14 @@ impl Editor {
         let Some(doc_url) = doc.url() else {
             return;
         };
+
+        if !doc.is_trusted {
+            self.set_status(
+                "Workspace untrusted: LSPs, formatting and debuggers are disabled. Use :trust-workspace to trust the current workspace",
+            );
+            return;
+        }
+
         let (lang, path) = (doc.language.clone(), doc.path().cloned());
         let config = doc.config.load();
         let root_dirs = &config.workspace_lsp_roots;

@@ -1,6 +1,6 @@
 use crate::keymap;
 use crate::keymap::{merge_keys, KeyTrie};
-use helix_loader::merge_toml_values;
+use helix_loader::{merge_toml_values, trust_db};
 use helix_view::{document::Mode, theme};
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -14,6 +14,7 @@ use toml::de::Error as TomlError;
 pub enum LoadWorkspaceConfig {
     Always,
     #[default]
+    Trusted,
     Never,
 }
 
@@ -41,7 +42,7 @@ impl Default for Config {
             keys: keymap::default(),
             editor: helix_view::editor::Config::default(),
             // more secure than LoadWorkspaceConfig::Always
-            load_workspace_config: LoadWorkspaceConfig::Never,
+            load_workspace_config: LoadWorkspaceConfig::Trusted,
         }
     }
 }
@@ -74,11 +75,25 @@ impl Config {
     ) -> Result<Config, ConfigLoadError> {
         let global_config: Result<ConfigRaw, ConfigLoadError> =
             global.and_then(|file| toml::from_str(&file).map_err(ConfigLoadError::BadConfig));
+        let is_local_trusted = local.as_ref().is_ok_and(|s| {
+            trust_db::is_file_trusted(
+                &helix_loader::workspace_config_file(),
+                s.as_str().as_bytes(),
+            )
+            .is_ok_and(|b| b)
+        });
         let local_config: Result<ConfigRaw, ConfigLoadError> =
             local.and_then(|file| toml::from_str(&file).map_err(ConfigLoadError::BadConfig));
         let res = match (global_config, local_config) {
             (Ok(global), Ok(local)) => {
-                let use_local = global.load_workspace_config == Some(LoadWorkspaceConfig::Always);
+                let use_local = if global.load_workspace_config == Some(LoadWorkspaceConfig::Always)
+                {
+                    true
+                } else if global.load_workspace_config == Some(LoadWorkspaceConfig::Never) {
+                    false
+                } else {
+                    is_local_trusted
+                };
                 let mut keys = keymap::default();
                 if let Some(global_keys) = global.keys {
                     merge_keys(&mut keys, global_keys)
@@ -149,7 +164,7 @@ impl Config {
     pub fn load_default() -> Result<Config, ConfigLoadError> {
         let global_config =
             fs::read_to_string(helix_loader::config_file()).map_err(ConfigLoadError::Error);
-        let local_config = fs::read_to_string(helix_loader::workspace_config_file())
+        let local_config = fs::read_to_string(&helix_loader::workspace_config_file())
             .map_err(ConfigLoadError::Error);
         Config::load(global_config, local_config)
     }
