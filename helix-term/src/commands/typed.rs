@@ -2890,6 +2890,64 @@ fn untrust_workspace_language(
     Ok(())
 }
 
+fn trust_workspace_completely(
+    cx: &mut compositor::Context,
+    _args: Args,
+    event: PromptEvent,
+) -> anyhow::Result<()> {
+    if event != PromptEvent::Update {
+        return Ok(());
+    }
+    let Some(path) = doc!(cx.editor).path() else {
+        bail!("Document does not have a path; you need to add a path to trust it.")
+    };
+    let workspace = helix_loader::find_workspace_in(path).0;
+    match trust_db::trust_workspace_completely(&workspace) {
+        Err(e) => bail!("Couldn't edit trust database: {e}"),
+        Ok(is_added) => {
+            if is_added {
+                cx.editor.set_status(format!("Added '{}' to the trust database; LSPs, debuggers, formatters and local config.toml/languages.toml can be used in this workspace.", workspace.display()));
+            } else {
+                cx.editor.set_status(format!(
+                    "Workspace '{}' is already trusted completely",
+                    workspace.display()
+                ));
+            }
+            doc_mut!(cx.editor).is_trusted = true;
+        }
+    }
+    Ok(())
+}
+
+fn untrust_workspace_completely(
+    cx: &mut compositor::Context,
+    _args: Args,
+    event: PromptEvent,
+) -> anyhow::Result<()> {
+    if event != PromptEvent::Update {
+        return Ok(());
+    }
+    let Some(path) = doc!(cx.editor).path() else {
+        bail!("Document does not have a path; you need to add a path to trust it.")
+    };
+    let workspace = helix_loader::find_workspace_in(path).0;
+    match trust_db::untrust_workspace_completely(&workspace) {
+        Err(e) => bail!("Couldn't edit trust database: {e}"),
+        Ok(is_added) => {
+            if is_added {
+                cx.editor.set_status(format!("'{}' is no longer completely trusted; restart the editor or use :lsp-stop and :config-reload", workspace.display()));
+            } else {
+                cx.editor.set_status(format!(
+                    "Workspace '{}' is already not completely trusted. Perhaps you wanted to use :untrust-workspace or one of :untrust-workspace-*?",
+                    workspace.display()
+                ));
+            }
+            doc_mut!(cx.editor).is_trusted = false;
+        }
+    }
+    Ok(())
+}
+
 /// This command accepts a single boolean --skip-visible flag and no positionals.
 const BUFFER_CLOSE_OTHERS_SIGNATURE: Signature = Signature {
     positionals: (0, Some(0)),
@@ -3954,7 +4012,7 @@ pub const TYPABLE_COMMAND_LIST: &[TypableCommand] = &[
     TypableCommand {
         name: "untrust-workspace",
         aliases: &[],
-        doc: "Untrusts the current workspace, disallowing the usage of LSPs, debuggers and formatters.",
+        doc: "Untrusts the current workspace, disallowing the usage of LSPs, debuggers and formatters. Note: this also temporarily overrides :trust-workspace-completely for the current document.",
         fun: untrust_workspace,
         completer: CommandCompleter::none(),
         signature: Signature {
@@ -3965,8 +4023,7 @@ pub const TYPABLE_COMMAND_LIST: &[TypableCommand] = &[
     TypableCommand {
         name: "trust-workspace-config",
         aliases: &[],
-        doc: "Trust the current workspace's config.toml file. The trust holds until the path or contents of the file change.
-Caution: It may contain arbitrary keymaps which map to arbitrary commands.",
+        doc: "Trust the current workspace's config.toml file. The trust holds until the path or contents of the file change. Caution: The config file may contain arbitrary keymaps which map to arbitrary commands.",
         fun: trust_workspace_config,
         completer: CommandCompleter::none(),
         signature: Signature {
@@ -3988,8 +4045,7 @@ Caution: It may contain arbitrary keymaps which map to arbitrary commands.",
     TypableCommand {
         name: "trust-workspace-languages",
         aliases: &[],
-        doc: "Trust the current workspace's languages.toml file. The trust holds until the path or contents of the file change.
-Caution: It may allow arbitrary execution of files when enabling LSPs or using formatters.",
+        doc: "Trust the current workspace's languages.toml file. The trust holds until the path or contents of the file change. Caution: It may allow arbitrary execution of files when enabling LSPs or using formatters.",
         fun: trust_workspace_language,
         completer: CommandCompleter::none(),
         signature: Signature {
@@ -4002,6 +4058,28 @@ Caution: It may allow arbitrary execution of files when enabling LSPs or using f
         aliases: &[],
         doc: "Untrust the current workspace's languages.toml file.",
         fun: untrust_workspace_language,
+        completer: CommandCompleter::none(),
+        signature: Signature {
+            positionals: (0, Some(0)),
+            ..Signature::DEFAULT
+        },
+    },
+    TypableCommand {
+        name: "trust-workspace-completely",
+        aliases: &[],
+        doc: "Trusts the current workspace completely, overriding the regular :trust-workspace/:trust-workspace-* configuration. This allows the usage of LSPs, debuggers, formatters and local config.toml/languages.toml",
+        fun: trust_workspace_completely,
+        completer: CommandCompleter::none(),
+        signature: Signature {
+            positionals: (0, Some(0)),
+            ..Signature::DEFAULT
+        },
+    },
+    TypableCommand {
+        name: "untrust-workspace-completely",
+        aliases: &[],
+        doc: "Disables trust-workspace-completely and resets :trust-workspace to its default. The local config.toml/languages.toml will retain their previous trust configuration.",
+        fun: untrust_workspace_completely,
         completer: CommandCompleter::none(),
         signature: Signature {
             positionals: (0, Some(0)),
