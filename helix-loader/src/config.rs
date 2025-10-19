@@ -1,4 +1,4 @@
-use std::str::from_utf8;
+use std::{io::ErrorKind, str::from_utf8};
 
 use crate::{trust_db, workspace_languages_file};
 
@@ -11,7 +11,16 @@ pub fn default_lang_config() -> toml::Value {
 
 pub fn is_local_lang_config_trusted() -> std::io::Result<bool> {
     let path = workspace_languages_file();
-    let contents = std::fs::read_to_string(&path)?;
+    let contents = match std::fs::read_to_string(&path) {
+        Ok(c) => c,
+        Err(e) => {
+            if e.kind() == ErrorKind::NotFound {
+                return Ok(false);
+            } else {
+                return Err(e);
+            }
+        }
+    };
     trust_db::is_file_trusted(&path, contents.as_bytes())
 }
 
