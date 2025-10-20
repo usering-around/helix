@@ -579,8 +579,13 @@ fn format(cx: &mut compositor::Context, _args: Args, event: PromptEvent) -> anyh
 
     let (view, doc) = current_ref!(cx.editor);
     // Document::format doesn't work anyways; this is done to notify the user
-    if !doc.is_trusted {
-        bail!("Formatting is disabled in untrusted workspaces.")
+    match doc!(cx.editor).is_trusted {
+        Some(is_trusted) => {
+            if !is_trusted {
+                bail!("Formatting is disabled in untrusted workspaces.")
+            }
+        }
+        None => bail!("Set up trust settings first"),
     }
     let format = doc.format(cx.editor).context(
         "A formatter isn't available, and no language server provides formatting capabilities",
@@ -1538,8 +1543,13 @@ fn lsp_workspace_command(
     }
 
     let doc = doc!(cx.editor);
-    if !doc.is_trusted {
-        bail!("LSP commands are disabled in untrusted workspaces.");
+    match doc!(cx.editor).is_trusted {
+        Some(is_trusted) => {
+            if !is_trusted {
+                bail!("LSP commands are disabled in untrusted workspaces.");
+            }
+        }
+        None => bail!("Set up trust settings first"),
     }
     let ls_id_commands = doc
         .language_servers_with_feature(LanguageServerFeature::WorkspaceCommand)
@@ -1638,9 +1648,15 @@ fn lsp_restart(cx: &mut compositor::Context, args: Args, event: PromptEvent) -> 
 
     let editor_config = cx.editor.config.load();
     let doc = doc!(cx.editor);
-    if !doc.is_trusted {
-        bail!("LSPs are disabled in untrusted workspaces.")
+    match doc!(cx.editor).is_trusted {
+        Some(is_trusted) => {
+            if !is_trusted {
+                bail!("LSPs are disabled in untrusted workspaces.")
+            }
+        }
+        None => bail!("Set up trust settings first"),
     }
+
     let config = doc
         .language_config()
         .context("LSP not defined for the current document")?;
@@ -1911,8 +1927,13 @@ fn debug_eval(cx: &mut compositor::Context, args: Args, event: PromptEvent) -> a
     if event != PromptEvent::Validate {
         return Ok(());
     }
-    if !doc!(cx.editor).is_trusted {
-        bail!("Debugging is disabled in untrusted workspaces.");
+    match doc!(cx.editor).is_trusted {
+        Some(is_trusted) => {
+            if !is_trusted {
+                bail!("Debugging is disabled in untrusted workspaces.")
+            }
+        }
+        None => bail!("Set up trust settings first"),
     }
 
     if let Some(debugger) = cx.editor.debug_adapters.get_active_client() {
@@ -1936,8 +1957,13 @@ fn debug_start(cx: &mut compositor::Context, args: Args, event: PromptEvent) -> 
     if event != PromptEvent::Validate {
         return Ok(());
     }
-    if !doc!(cx.editor).is_trusted {
-        bail!("Debugging is disabled in untrusted workspaces.");
+    match doc!(cx.editor).is_trusted {
+        Some(is_trusted) => {
+            if !is_trusted {
+                bail!("Debugging is disabled in untrusted workspaces.")
+            }
+        }
+        None => bail!("Set up trust settings first"),
     }
 
     let mut args: Vec<_> = args.into_iter().collect();
@@ -1956,8 +1982,13 @@ fn debug_remote(
     if event != PromptEvent::Validate {
         return Ok(());
     }
-    if !doc!(cx.editor).is_trusted {
-        bail!("Debugging is disabled in untrusted workspaces.")
+    match doc!(cx.editor).is_trusted {
+        Some(is_trusted) => {
+            if !is_trusted {
+                bail!("Debugging is disabled in untrusted workspaces.")
+            }
+        }
+        None => bail!("Set up trust settings first"),
     }
 
     let mut args: Vec<_> = args.into_iter().collect();
@@ -2710,7 +2741,7 @@ fn trust_workspace(
         bail!("Document does not have a path; you need to add a path to trust it.")
     };
     let workspace = helix_loader::find_workspace_in(path).0;
-    match trust_db::trust_workspace(&workspace) {
+    match trust_db::trust_workspace(&workspace, false) {
         Err(e) => bail!("Couldn't edit trust database: {e}"),
         Ok(is_added) => {
             if is_added {
@@ -2721,7 +2752,7 @@ fn trust_workspace(
                     workspace.display()
                 ));
             }
-            doc_mut!(cx.editor).is_trusted = true;
+            doc_mut!(cx.editor).is_trusted = Some(true);
         }
     }
     Ok(())
@@ -2753,7 +2784,7 @@ fn untrust_workspace(
                     workspace.display()
                 ));
             }
-            doc_mut!(cx.editor).is_trusted = false;
+            doc_mut!(cx.editor).is_trusted = Some(false);
         }
     }
     Ok(())
@@ -2799,11 +2830,8 @@ fn untrust_workspace_config(
         return Ok(());
     }
     let config = helix_loader::workspace_config_file();
-    let contents = match std::fs::read_to_string(&config) {
-        Ok(s) => s,
-        Err(e) => bail!("Couldn't read '{}': {e}", config.display()),
-    };
-    match trust_db::untrust_file(&config, contents.as_bytes()) {
+
+    match trust_db::untrust_file(&config) {
         Err(e) => bail!("Couldn't edit trust database: {e}"),
         Ok(is_added) => {
             if is_added {
@@ -2866,11 +2894,8 @@ fn untrust_workspace_language(
     }
 
     let config = helix_loader::workspace_languages_file();
-    let contents = match std::fs::read_to_string(&config) {
-        Ok(s) => s,
-        Err(e) => bail!("Couldn't read '{}': {e}", config.display()),
-    };
-    match trust_db::untrust_file(&config, contents.as_bytes()) {
+
+    match trust_db::untrust_file(&config) {
         Err(e) => bail!("Couldn't edit trust database: {e}"),
         Ok(is_removed) => {
             if is_removed {
@@ -2902,7 +2927,7 @@ fn trust_workspace_completely(
         bail!("Document does not have a path; you need to add a path to trust it.")
     };
     let workspace = helix_loader::find_workspace_in(path).0;
-    match trust_db::trust_workspace_completely(&workspace) {
+    match trust_db::trust_workspace(&workspace, true) {
         Err(e) => bail!("Couldn't edit trust database: {e}"),
         Ok(is_added) => {
             if is_added {
@@ -2913,36 +2938,7 @@ fn trust_workspace_completely(
                     workspace.display()
                 ));
             }
-            doc_mut!(cx.editor).is_trusted = true;
-        }
-    }
-    Ok(())
-}
-
-fn untrust_workspace_completely(
-    cx: &mut compositor::Context,
-    _args: Args,
-    event: PromptEvent,
-) -> anyhow::Result<()> {
-    if event != PromptEvent::Validate {
-        return Ok(());
-    }
-    let Some(path) = doc!(cx.editor).path() else {
-        bail!("Document does not have a path; you need to add a path to trust it.")
-    };
-    let workspace = helix_loader::find_workspace_in(path).0;
-    match trust_db::untrust_workspace_completely(&workspace) {
-        Err(e) => bail!("Couldn't edit trust database: {e}"),
-        Ok(is_added) => {
-            if is_added {
-                cx.editor.set_status(format!("'{}' is no longer completely trusted; restart the editor or use :lsp-stop and :config-reload", workspace.display()));
-            } else {
-                cx.editor.set_status(format!(
-                    "Workspace '{}' is already not completely trusted. Perhaps you wanted to use :untrust-workspace or one of :untrust-workspace-*?",
-                    workspace.display()
-                ));
-            }
-            doc_mut!(cx.editor).is_trusted = false;
+            doc_mut!(cx.editor).is_trusted = Some(true);
         }
     }
     Ok(())
@@ -4012,7 +4008,7 @@ pub const TYPABLE_COMMAND_LIST: &[TypableCommand] = &[
     TypableCommand {
         name: "untrust-workspace",
         aliases: &[],
-        doc: "Untrusts the current workspace, disallowing the usage of LSPs, debuggers and formatters. Note: this also temporarily overrides :trust-workspace-completely for the current document.",
+        doc: "Untrusts the current workspace, disallowing the usage of LSPs, debuggers and formatters. Note: this will cancel :trust-workspace-completely, but not :trust-workspace-config/languages.",
         fun: untrust_workspace,
         completer: CommandCompleter::none(),
         signature: Signature {
@@ -4067,7 +4063,7 @@ pub const TYPABLE_COMMAND_LIST: &[TypableCommand] = &[
     TypableCommand {
         name: "trust-workspace-completely",
         aliases: &[],
-        doc: "Trusts the current workspace completely, overriding the regular :trust-workspace/:trust-workspace-* configuration. This allows the usage of LSPs, debuggers, formatters and local config.toml/languages.toml",
+        doc: "Trusts the current workspace completely, allowing the usage of LSPs, debuggers, formatters and local config.toml/languages.toml. Use :untrust-workspace to cancel.",
         fun: trust_workspace_completely,
         completer: CommandCompleter::none(),
         signature: Signature {
@@ -4075,18 +4071,6 @@ pub const TYPABLE_COMMAND_LIST: &[TypableCommand] = &[
             ..Signature::DEFAULT
         },
     },
-    TypableCommand {
-        name: "untrust-workspace-completely",
-        aliases: &[],
-        doc: "Disables trust-workspace-completely and resets :trust-workspace to its default. The local config.toml/languages.toml will retain their previous trust configuration.",
-        fun: untrust_workspace_completely,
-        completer: CommandCompleter::none(),
-        signature: Signature {
-            positionals: (0, Some(0)),
-            ..Signature::DEFAULT
-        },
-    },
-
 ];
 
 pub static TYPABLE_COMMAND_MAP: Lazy<HashMap<&'static str, &'static TypableCommand>> =

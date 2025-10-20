@@ -219,7 +219,7 @@ pub struct Document {
     // `ArcSwap` directly.
     syn_loader: Arc<ArcSwap<syntax::Loader>>,
 
-    pub is_trusted: bool,
+    pub is_trusted: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -736,7 +736,7 @@ impl Document {
             syn_loader,
             previous_diagnostic_id: None,
             pull_diagnostic_controller: TaskController::new(),
-            is_trusted: false,
+            is_trusted: None,
         }
     }
 
@@ -821,7 +821,7 @@ impl Document {
         &self,
         editor: &Editor,
     ) -> Option<BoxFuture<'static, Result<Transaction, FormatterError>>> {
-        if !self.is_trusted {
+        if !self.is_trusted.unwrap_or(false) {
             return None;
         }
         if let Some((fmt_cmd, fmt_args)) = self

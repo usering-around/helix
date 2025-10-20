@@ -1604,10 +1604,7 @@ impl Editor {
             return;
         };
 
-        if !doc.is_trusted {
-            self.set_status(
-                "Workspace untrusted: LSPs, formatting and debuggers are disabled. Use :trust-workspace to trust the current workspace",
-            );
+        if !doc.is_trusted.unwrap_or(false) {
             return;
         }
 

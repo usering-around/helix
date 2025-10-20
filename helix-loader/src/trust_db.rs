@@ -1,7 +1,6 @@
 use std::{
-    collections::HashSet,
+    collections::HashMap,
     fs::File,
-    hash::Hash,
     io::ErrorKind,
     path::{Path, PathBuf},
 };
@@ -14,49 +13,42 @@ use crate::{data_dir, ensure_parent_dir, find_workspace_in};
 
 #[derive(Serialize, Deserialize, Default)]
 struct TrustDb {
-    workspace: Option<HashSet<PathBuf>>,
-    files: Option<HashSet<Vec<u8>>>,
-    completely: Option<HashSet<PathBuf>>,
+    trust: Option<HashMap<PathBuf, Trust>>,
 }
 
-fn insert_or_create<T: Eq + Hash>(maybe_set: &mut Option<HashSet<T>>, t: T) -> bool {
-    if let Some(set) = maybe_set {
-        HashSet::insert(set, t)
-    } else {
-        let mut set = HashSet::new();
-        set.insert(t);
-        *maybe_set = Some(set);
-        true
-    }
-}
-
-fn remove_if_exists<T: Eq + Hash>(maybe_set: &mut Option<HashSet<T>>, val: &T) -> bool {
-    if let Some(set) = maybe_set {
-        set.remove(val)
-    } else {
-        false
-    }
+#[derive(Serialize, Deserialize)]
+enum Trust {
+    Workspace { completely: bool },
+    File { hash: Vec<u8> },
+    Untrusted,
 }
 
 impl TrustDb {
     fn is_file_in_completely_trusted(&self, path: impl AsRef<Path>) -> bool {
-        self.completely
-            .as_ref()
-            .is_some_and(|c| c.contains(&find_workspace_in(path).0))
+        self.trust.as_ref().is_some_and(|t| {
+            t.get(&find_workspace_in(path).0)
+                .is_some_and(|trust| match trust {
+                    Trust::Workspace { completely } => *completely,
+                    _ => false,
+                })
+        })
     }
-    fn is_file_trusted(&self, path: impl AsRef<Path>, hash: &[u8]) -> bool {
-        self.files.as_ref().is_some_and(|f| f.contains(hash))
-            || self.is_file_in_completely_trusted(path)
+    fn is_file_trusted(&self, path: impl AsRef<Path>, file_hash: &[u8]) -> bool {
+        self.trust.as_ref().is_some_and(|t| {
+            t.get(path.as_ref()).is_some_and(|h| match h {
+                Trust::File { hash } => hash == file_hash,
+                _ => false,
+            })
+        }) || self.is_file_in_completely_trusted(path)
     }
 
-    fn is_workspace_trusted(&self, path: impl AsRef<Path>) -> bool {
-        self.workspace
-            .as_ref()
-            .is_some_and(|w| w.contains(path.as_ref()))
-            || self
-                .completely
-                .as_ref()
-                .is_some_and(|c| c.contains(path.as_ref()))
+    fn is_workspace_trusted(&self, path: impl AsRef<Path>) -> Option<bool> {
+        self.trust.as_ref().and_then(|t| {
+            t.get(path.as_ref()).and_then(|trust| match trust {
+                Trust::Workspace { .. } => Some(true),
+                _ => Some(false),
+            })
+        })
     }
 
     fn lock() -> std::io::Result<File> {
@@ -136,42 +128,33 @@ fn trust_db_lock_file() -> PathBuf {
     trust_db_file().with_extension("lock")
 }
 
-pub fn trust_workspace_completely(path: impl AsRef<Path>) -> std::io::Result<bool> {
-    let Ok(path) = path.as_ref().canonicalize() else {
-        // if canonicalize fails, it means either that path does not exist, or it is invalid,
-        // either of which implies that it shouldn't be in the database
-        return Ok(false);
-    };
-    TrustDb::modify(|db| insert_or_create(&mut db.completely, path))
-}
-
-pub fn untrust_workspace_completely(path: impl AsRef<Path>) -> std::io::Result<bool> {
+pub fn trust_workspace(path: impl AsRef<Path>, completely: bool) -> std::io::Result<bool> {
     let Ok(path) = path.as_ref().canonicalize() else {
         return Ok(false);
     };
     TrustDb::modify(|db| {
-        remove_if_exists(&mut db.workspace, &path);
-        remove_if_exists(&mut db.completely, &path)
+        db.trust
+            .get_or_insert(HashMap::new())
+            .insert(path, Trust::Workspace { completely })
+            .is_none()
     })
-}
-
-pub fn trust_workspace(path: impl AsRef<Path>) -> std::io::Result<bool> {
-    let Ok(path) = path.as_ref().canonicalize() else {
-        return Ok(false);
-    };
-    TrustDb::modify(|db| insert_or_create(&mut db.workspace, path))
 }
 
 pub fn untrust_workspace(path: impl AsRef<Path>) -> std::io::Result<bool> {
     let Ok(path) = path.as_ref().canonicalize() else {
         return Ok(false);
     };
-    TrustDb::modify(|db| remove_if_exists(&mut db.workspace, &path))
+    TrustDb::modify(|db| {
+        db.trust
+            .get_or_insert(HashMap::new())
+            .remove(&path)
+            .is_some()
+    })
 }
 
-pub fn is_workspace_trusted(path: impl AsRef<Path>) -> std::io::Result<bool> {
+pub fn is_workspace_trusted(path: impl AsRef<Path>) -> std::io::Result<Option<bool>> {
     let Ok(path) = path.as_ref().canonicalize() else {
-        return Ok(false);
+        return Ok(Some(false));
     };
     TrustDb::inspect(|db| db.is_workspace_trusted(path))
 }
@@ -180,16 +163,25 @@ pub fn trust_file(path: impl AsRef<Path>, contents: &[u8]) -> std::io::Result<bo
     let Ok(path) = path.as_ref().canonicalize() else {
         return Ok(false);
     };
-    let hash = TrustDb::hash_file(path, contents);
-    TrustDb::modify(|db| insert_or_create(&mut db.files, hash))
+    let hash = TrustDb::hash_file(&path, contents);
+    TrustDb::modify(|db| {
+        db.trust
+            .get_or_insert(HashMap::new())
+            .insert(path, Trust::File { hash })
+            .is_none()
+    })
 }
 
-pub fn untrust_file(path: impl AsRef<Path>, contents: &[u8]) -> std::io::Result<bool> {
+pub fn untrust_file(path: impl AsRef<Path>) -> std::io::Result<bool> {
     let Ok(path) = path.as_ref().canonicalize() else {
         return Ok(false);
     };
-    let hash = TrustDb::hash_file(path, contents);
-    TrustDb::modify(|db| remove_if_exists(&mut db.files, &hash))
+    TrustDb::modify(|db| {
+        db.trust
+            .get_or_insert(HashMap::new())
+            .remove(&path)
+            .is_some()
+    })
 }
 
 pub fn is_file_trusted(path: impl AsRef<Path>, contents: &[u8]) -> std::io::Result<bool> {
