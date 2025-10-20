@@ -2703,7 +2703,7 @@ fn trust_workspace(
     _args: Args,
     event: PromptEvent,
 ) -> anyhow::Result<()> {
-    if event != PromptEvent::Update {
+    if event != PromptEvent::Validate {
         return Ok(());
     }
     let Some(path) = doc!(cx.editor).path() else {
@@ -2895,7 +2895,7 @@ fn trust_workspace_completely(
     _args: Args,
     event: PromptEvent,
 ) -> anyhow::Result<()> {
-    if event != PromptEvent::Update {
+    if event != PromptEvent::Validate {
         return Ok(());
     }
     let Some(path) = doc!(cx.editor).path() else {
@@ -2924,7 +2924,7 @@ fn untrust_workspace_completely(
     _args: Args,
     event: PromptEvent,
 ) -> anyhow::Result<()> {
-    if event != PromptEvent::Update {
+    if event != PromptEvent::Validate {
         return Ok(());
     }
     let Some(path) = doc!(cx.editor).path() else {
