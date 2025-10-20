@@ -16,8 +16,8 @@ struct TrustDb {
     trust: Option<HashMap<PathBuf, Trust>>,
 }
 
-#[derive(Serialize, Deserialize)]
-enum Trust {
+#[derive(Serialize, Deserialize, PartialEq)]
+pub enum Trust {
     Workspace { completely: bool },
     File { hash: Vec<u8> },
     Untrusted,
@@ -128,27 +128,25 @@ fn trust_db_lock_file() -> PathBuf {
     trust_db_file().with_extension("lock")
 }
 
-pub fn trust_workspace(path: impl AsRef<Path>, completely: bool) -> std::io::Result<bool> {
+pub fn trust_workspace(path: impl AsRef<Path>, completely: bool) -> std::io::Result<Option<Trust>> {
     let Ok(path) = path.as_ref().canonicalize() else {
-        return Ok(false);
+        return Ok(None);
     };
     TrustDb::modify(|db| {
         db.trust
             .get_or_insert(HashMap::new())
             .insert(path, Trust::Workspace { completely })
-            .is_none()
     })
 }
 
-pub fn untrust_workspace(path: impl AsRef<Path>) -> std::io::Result<bool> {
+pub fn untrust_workspace(path: impl AsRef<Path>) -> std::io::Result<Option<Trust>> {
     let Ok(path) = path.as_ref().canonicalize() else {
-        return Ok(false);
+        return Ok(None);
     };
     TrustDb::modify(|db| {
         db.trust
             .get_or_insert(HashMap::new())
-            .remove(&path)
-            .is_some()
+            .insert(path, Trust::Untrusted)
     })
 }
 

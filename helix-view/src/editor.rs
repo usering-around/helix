@@ -15,6 +15,7 @@ use crate::{
     Document, DocumentId, View, ViewId,
 };
 use helix_event::dispatch;
+use helix_loader::trust_db::{self, Trust};
 use helix_vcs::DiffProviderRegistry;
 
 use futures_util::stream::select_all::SelectAll;
@@ -2362,6 +2363,92 @@ impl Editor {
 
     pub fn get_last_cwd(&mut self) -> Option<&Path> {
         self.last_cwd.as_deref()
+    }
+
+    pub fn trust_workspace(&mut self, trust_completely: bool) -> anyhow::Result<()> {
+        let Some(path) = doc!(self).path() else {
+            bail!("Document does not have a path; you need to add a path to trust it.")
+        };
+        let workspace = helix_loader::find_workspace_in(path).0;
+        match trust_db::trust_workspace(&workspace, trust_completely) {
+            Err(e) => bail!("Couldn't edit trust database: {e}"),
+            Ok(prev_trust) => {
+                match prev_trust {
+                    None | Some(Trust::Untrusted) => {
+                        if trust_completely {
+                            self.set_status(format!("Workspace '{}' is now completely unrestricted; LSPs, debuggers, formatters and local config can be used in this workspace.", workspace.display()))
+                        } else {
+                            self.set_status(format!("Workspace '{}' is now unrestricted; LSPs, debuggers and formatters now be used in this workspace.", workspace.display()))
+                        }
+                    }
+                    Some(Trust::Workspace { completely }) => {
+                        if completely == true && trust_completely == false {
+                            self.set_status(format!("Downgraded workspace '{}' trust to regular. Local config is no longer trusted by default. Use :config-reload to unload it.", workspace.display()));
+                        } else if completely == false && trust_completely == true {
+                            self.set_status(format!(
+                    "Upgraded workspace '{}' trust to completely. Use :config-reload to load local config.",
+                    workspace.display()
+                    ));
+                        } else if trust_completely {
+                            self.set_status(format!(
+                                "Workspace '{}' is already completely trusted",
+                                workspace.display()
+                            ));
+                        } else {
+                            self.set_status(format!(
+                                "Workspace '{}' is already trusted.",
+                                workspace.display()
+                            ));
+                        }
+                    }
+
+                    _ => bail!("workspace is a file?? Report this bug"),
+                }
+
+                doc_mut!(self).is_trusted = Some(true);
+            }
+        }
+        Ok(())
+    }
+
+    pub fn untrust_workspace(&mut self) -> anyhow::Result<()> {
+        let Some(path) = doc!(self).path() else {
+            bail!("Document does not have a path; it is already untrusted.")
+        };
+        let workspace = helix_loader::find_workspace_in(path).0;
+        match trust_db::untrust_workspace(&workspace) {
+            Err(e) => bail!("Couldn't edit trust database: {e}"),
+            Ok(prev_trust) => {
+                match prev_trust {
+                    None => self.set_status(format!(
+                    "Workspace '{}' is now restricted; LSPs, formatters and debuggers do not work.",
+                    workspace.display()
+                )),
+                    Some(Trust::Workspace { completely }) => {
+                        if completely {
+                            self.set_status(format!(
+                    "Workspace '{}' is now restricted; use :lsp-stop to stop any running LSPs and :config-reload to unload the local config.",
+                              workspace.display()
+                ))
+                        } else {
+                            self.set_status(format!(
+                    "Workspace '{}' is now restricted; use :lsp-stop to stop any running LSP.",
+                    workspace.display()
+                    ))
+                        }
+                    }
+
+                    Some(Trust::Untrusted) => self.set_status(format!(
+                        "Workspace '{}' was already untrusted.",
+                        workspace.display()
+                    )),
+                    _ => bail!("workspace is a file?? Report this bug"),
+                }
+
+                doc_mut!(self).is_trusted = Some(false);
+            }
+        }
+        Ok(())
     }
 }
 

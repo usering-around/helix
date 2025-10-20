@@ -10,7 +10,7 @@ use helix_core::command_line::{Args, Flag, Signature, Token, TokenKind};
 use helix_core::fuzzy::fuzzy_match;
 use helix_core::indent::MAX_INDENT;
 use helix_core::line_ending;
-use helix_loader::trust_db;
+use helix_loader::trust_db::{self, Trust};
 use helix_stdx::path::home_dir;
 use helix_view::document::{read_to_string, DEFAULT_LANGUAGE_NAME};
 use helix_view::editor::{CloseError, ConfigEvent};
@@ -1646,7 +1646,6 @@ fn lsp_restart(cx: &mut compositor::Context, args: Args, event: PromptEvent) -> 
         return Ok(());
     }
 
-    let editor_config = cx.editor.config.load();
     let doc = doc!(cx.editor);
     match doc!(cx.editor).is_trusted {
         Some(is_trusted) => {
@@ -1656,6 +1655,8 @@ fn lsp_restart(cx: &mut compositor::Context, args: Args, event: PromptEvent) -> 
         }
         None => bail!("Set up trust settings first"),
     }
+
+    let editor_config = cx.editor.config.load();
 
     let config = doc
         .language_config()
@@ -2737,25 +2738,7 @@ fn trust_workspace(
     if event != PromptEvent::Validate {
         return Ok(());
     }
-    let Some(path) = doc!(cx.editor).path() else {
-        bail!("Document does not have a path; you need to add a path to trust it.")
-    };
-    let workspace = helix_loader::find_workspace_in(path).0;
-    match trust_db::trust_workspace(&workspace, false) {
-        Err(e) => bail!("Couldn't edit trust database: {e}"),
-        Ok(is_added) => {
-            if is_added {
-                cx.editor.set_status(format!("Added '{}' to the trust database; LSPs, debuggers and formatters can now be used in this workspace.", workspace.display()));
-            } else {
-                cx.editor.set_status(format!(
-                    "Workspace '{}' is already in the trust database",
-                    workspace.display()
-                ));
-            }
-            doc_mut!(cx.editor).is_trusted = Some(true);
-        }
-    }
-    Ok(())
+    cx.editor.trust_workspace(false)
 }
 
 fn untrust_workspace(
@@ -2766,24 +2749,40 @@ fn untrust_workspace(
     if event != PromptEvent::Validate {
         return Ok(());
     }
+
     let Some(path) = doc!(cx.editor).path() else {
         bail!("Document does not have a path; it is already untrusted.")
     };
     let workspace = helix_loader::find_workspace_in(path).0;
     match trust_db::untrust_workspace(&workspace) {
         Err(e) => bail!("Couldn't edit trust database: {e}"),
-        Ok(is_removed) => {
-            if is_removed {
-                cx.editor.set_status(format!(
-                    "Removed '{}' from the trust database; restart the editor or use :lsp-stop to stop running LSPs.",
+        Ok(prev_trust) => {
+            match prev_trust {
+                None => cx.editor.set_status(format!(
+                    "Workspace '{}' is now restricted; LSPs, formatters and debuggers do not work.",
                     workspace.display()
-                ));
-            } else {
-                cx.editor.set_status(format!(
-                    "Workspace '{}' is not in the trust database.",
+                )),
+                Some(Trust::Workspace { completely }) => {
+                    if completely {
+                        cx.editor.set_status(format!(
+                    "Workspace '{}' is now restricted; use :lsp-stop to stop any running LSPs and :config-reload to unload the local config.",
+                              workspace.display()
+                ))
+                    } else {
+                        cx.editor.set_status(format!(
+                    "Workspace '{}' is now restricted; use :lsp-stop to stop any running LSP.",
                     workspace.display()
-                ));
+                    ))
+                    }
+                }
+
+                Some(Trust::Untrusted) => cx.editor.set_status(format!(
+                    "Workspace '{}' was already untrusted.",
+                    workspace.display()
+                )),
+                _ => bail!("workspace is a file?? Report this bug"),
             }
+
             doc_mut!(cx.editor).is_trusted = Some(false);
         }
     }
@@ -2923,24 +2922,34 @@ fn trust_workspace_completely(
     if event != PromptEvent::Validate {
         return Ok(());
     }
-    let Some(path) = doc!(cx.editor).path() else {
-        bail!("Document does not have a path; you need to add a path to trust it.")
-    };
-    let workspace = helix_loader::find_workspace_in(path).0;
-    match trust_db::trust_workspace(&workspace, true) {
-        Err(e) => bail!("Couldn't edit trust database: {e}"),
-        Ok(is_added) => {
-            if is_added {
-                cx.editor.set_status(format!("Added '{}' to the trust database; LSPs, debuggers, formatters and local config.toml/languages.toml can be used in this workspace.", workspace.display()));
-            } else {
-                cx.editor.set_status(format!(
-                    "Workspace '{}' is already trusted completely",
-                    workspace.display()
-                ));
-            }
-            doc_mut!(cx.editor).is_trusted = Some(true);
-        }
+    cx.editor.trust_workspace(true)
+}
+
+impl ui::menu::Item for String {
+    type Data = ();
+    fn format(&self, _data: &Self::Data) -> tui::widgets::Row<'_> {
+        tui::widgets::Row::new(vec![ui::menu::Cell::from("ok")])
     }
+}
+
+fn trust_dialog(
+    cx: &mut compositor::Context,
+    _args: Args,
+    event: PromptEvent,
+) -> anyhow::Result<()> {
+    if event != PromptEvent::Validate {
+        return Ok(());
+    }
+    let callback = async move {
+        let call: job::Callback = Callback::EditorCompositor(Box::new(
+            move |editor: &mut Editor, compositor: &mut Compositor| {
+                crate::handlers::trust::trust_dialog(editor, compositor);
+            },
+        ));
+        Ok(call)
+    };
+    cx.jobs.callback(callback);
+
     Ok(())
 }
 
@@ -4071,6 +4080,19 @@ pub const TYPABLE_COMMAND_LIST: &[TypableCommand] = &[
             ..Signature::DEFAULT
         },
     },
+
+    TypableCommand {
+        name: "trust-dialog",
+        aliases: &[],
+        doc: "Open up the trust dialog. You can use :trust-*/:untrust-* commands instead.",
+        fun: trust_dialog,
+        completer: CommandCompleter::none(),
+        signature: Signature {
+            positionals: (0, Some(0)),
+            ..Signature::DEFAULT
+        },
+    },
+
 ];
 
 pub static TYPABLE_COMMAND_MAP: Lazy<HashMap<&'static str, &'static TypableCommand>> =
