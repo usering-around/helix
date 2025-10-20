@@ -81,7 +81,7 @@ impl Config {
                 || (c.load_workspace_config.unwrap_or_default() == LoadWorkspaceConfig::Trusted
                     && local.as_ref().is_ok_and(|s| {
                         trust_db::is_file_trusted(
-                            &helix_loader::workspace_config_file(),
+                            helix_loader::workspace_config_file(),
                             s.as_str().as_bytes(),
                         )
                         .is_ok_and(|b| b)
@@ -162,7 +162,7 @@ impl Config {
     pub fn load_default() -> Result<Config, ConfigLoadError> {
         let global_config =
             fs::read_to_string(helix_loader::config_file()).map_err(ConfigLoadError::Error);
-        let local_config = fs::read_to_string(&helix_loader::workspace_config_file())
+        let local_config = fs::read_to_string(helix_loader::workspace_config_file())
             .map_err(ConfigLoadError::Error);
         Config::load(global_config, local_config)
     }

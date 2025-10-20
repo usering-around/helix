@@ -44,10 +44,8 @@ impl TrustDb {
 
     fn is_workspace_trusted(&self, path: impl AsRef<Path>) -> Option<bool> {
         self.trust.as_ref().and_then(|t| {
-            t.get(path.as_ref()).and_then(|trust| match trust {
-                Trust::Workspace { .. } => Some(true),
-                _ => Some(false),
-            })
+            t.get(path.as_ref())
+                .map(|trust| matches!(trust, Trust::Workspace { .. }))
         })
     }
 
@@ -56,6 +54,7 @@ impl TrustDb {
             .read(true)
             .write(true)
             .create(true)
+            .truncate(false)
             .open(trust_db_lock_file())?;
         file.lock_exclusive()?;
         Ok(file)
@@ -76,10 +75,12 @@ impl TrustDb {
                 }
             }
         };
-        let toml: TrustDb = toml::from_str(&contents).expect(&format!(
-            "Trust database is corrupted. Try to fix {} or delete it",
-            trust_db_file().display()
-        ));
+        let toml: TrustDb = toml::from_str(&contents).unwrap_or_else(|_| {
+            panic!(
+                "Trust database is corrupted. Try to fix {} or delete it",
+                trust_db_file().display()
+            )
+        });
         let r = f(toml);
         drop(lock);
         Ok(r)
@@ -100,10 +101,12 @@ impl TrustDb {
                 }
             }
         };
-        let mut toml: TrustDb = toml::from_str(&contents).expect(&format!(
-            "Trust database is corrupted. Try to fix {} or delete it",
-            trust_db_file().display()
-        ));
+        let mut toml: TrustDb = toml::from_str(&contents).unwrap_or_else(|_| {
+            panic!(
+                "Trust database is corrupted. Try to fix {} or delete it",
+                trust_db_file().display()
+            )
+        });
         let r = f(&mut toml);
         let toml_updated =
             toml::to_string(&toml).expect("toml serialization of trust database failed?");

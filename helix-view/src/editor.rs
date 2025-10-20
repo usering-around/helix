@@ -2382,9 +2382,9 @@ impl Editor {
                         }
                     }
                     Some(Trust::Workspace { completely }) => {
-                        if completely == true && trust_completely == false {
+                        if completely && !trust_completely {
                             self.set_status(format!("Downgraded workspace '{}' trust to regular. Local config is no longer trusted by default. Use :config-reload to unload it.", workspace.display()));
-                        } else if completely == false && trust_completely == true {
+                        } else if !completely && trust_completely {
                             self.set_status(format!(
                     "Upgraded workspace '{}' trust to completely. Use :config-reload to load local config.",
                     workspace.display()
