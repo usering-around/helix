@@ -10,7 +10,7 @@ use helix_core::command_line::{Args, Flag, Signature, Token, TokenKind};
 use helix_core::fuzzy::fuzzy_match;
 use helix_core::indent::MAX_INDENT;
 use helix_core::line_ending;
-use helix_loader::trust_db::{self, Trust};
+use helix_loader::trust_db::{self};
 use helix_stdx::path::home_dir;
 use helix_view::document::{read_to_string, DEFAULT_LANGUAGE_NAME};
 use helix_view::editor::{CloseError, ConfigEvent};
@@ -2741,6 +2741,17 @@ fn trust_workspace(
     cx.editor.trust_workspace(false)
 }
 
+fn trust_workspace_completely(
+    cx: &mut compositor::Context,
+    _args: Args,
+    event: PromptEvent,
+) -> anyhow::Result<()> {
+    if event != PromptEvent::Validate {
+        return Ok(());
+    }
+    cx.editor.trust_workspace(true)
+}
+
 fn untrust_workspace(
     cx: &mut compositor::Context,
     _args: Args,
@@ -2750,43 +2761,7 @@ fn untrust_workspace(
         return Ok(());
     }
 
-    let Some(path) = doc!(cx.editor).path() else {
-        bail!("Document does not have a path; it is already untrusted.")
-    };
-    let workspace = helix_loader::find_workspace_in(path).0;
-    match trust_db::untrust_workspace(&workspace) {
-        Err(e) => bail!("Couldn't edit trust database: {e}"),
-        Ok(prev_trust) => {
-            match prev_trust {
-                None => cx.editor.set_status(format!(
-                    "Workspace '{}' is now restricted; LSPs, formatters and debuggers do not work.",
-                    workspace.display()
-                )),
-                Some(Trust::Workspace { completely }) => {
-                    if completely {
-                        cx.editor.set_status(format!(
-                    "Workspace '{}' is now restricted; use :lsp-stop to stop any running LSPs and :config-reload to unload the local config.",
-                              workspace.display()
-                ))
-                    } else {
-                        cx.editor.set_status(format!(
-                    "Workspace '{}' is now restricted; use :lsp-stop to stop any running LSP.",
-                    workspace.display()
-                    ))
-                    }
-                }
-
-                Some(Trust::Untrusted) => cx.editor.set_status(format!(
-                    "Workspace '{}' was already untrusted.",
-                    workspace.display()
-                )),
-                _ => bail!("workspace is a file?? Report this bug"),
-            }
-
-            doc_mut!(cx.editor).is_trusted = Some(false);
-        }
-    }
-    Ok(())
+    cx.editor.untrust_workspace()
 }
 
 fn trust_workspace_config(
@@ -2912,17 +2887,6 @@ fn untrust_workspace_language(
     }
 
     Ok(())
-}
-
-fn trust_workspace_completely(
-    cx: &mut compositor::Context,
-    _args: Args,
-    event: PromptEvent,
-) -> anyhow::Result<()> {
-    if event != PromptEvent::Validate {
-        return Ok(());
-    }
-    cx.editor.trust_workspace(true)
 }
 
 impl ui::menu::Item for String {
