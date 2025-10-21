@@ -1,7 +1,7 @@
 use arc_swap::{access::Map, ArcSwap};
 use futures_util::Stream;
 use helix_core::{diagnostic::Severity, pos_at_coords, syntax, Range, Selection};
-use helix_loader::config::is_local_lang_config_trusted;
+use helix_loader::is_config_file_trusted;
 use helix_lsp::{
     lsp::{self, notification::Notification},
     util::lsp_range_to_range,
@@ -417,12 +417,17 @@ impl Application {
             // call `Loader::set_scopes` which must be done before the documents are re-parsed for
             // the sake of locals highlighting.
             let load_config = self.config.load().load_workspace_config;
-            let use_local_config = if load_config == LoadWorkspaceConfig::Trusted {
-                is_local_lang_config_trusted()?
-            } else {
-                load_config == LoadWorkspaceConfig::Always
+            let use_local_lang = match load_config {
+                LoadWorkspaceConfig::TrustedWorkspace => {
+                    doc!(self.editor).is_trusted.unwrap_or_default()
+                }
+                LoadWorkspaceConfig::Manual => {
+                    is_config_file_trusted(helix_loader::workspace_languages_file())?
+                }
+                LoadWorkspaceConfig::Always => true,
+                LoadWorkspaceConfig::Never => false,
             };
-            let lang_loader = helix_core::config::user_lang_loader(use_local_config)?;
+            let lang_loader = helix_core::config::user_lang_loader(use_local_lang)?;
             self.editor.syn_loader.store(Arc::new(lang_loader));
             Self::load_configured_theme(
                 &mut self.editor,

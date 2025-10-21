@@ -118,11 +118,19 @@ FLAGS:
             Config::default()
         }
     };
-    let use_local_config = if config.load_workspace_config == LoadWorkspaceConfig::Trusted {
-        helix_loader::config::is_local_lang_config_trusted()?
-    } else {
-        config.load_workspace_config == LoadWorkspaceConfig::Always
+
+    let use_local_config = match config.load_workspace_config {
+        LoadWorkspaceConfig::TrustedWorkspace => {
+            helix_loader::trust_db::is_workspace_trusted(helix_loader::find_workspace().0)?
+                .unwrap_or_default()
+        }
+        LoadWorkspaceConfig::Manual => {
+            helix_loader::is_config_file_trusted(helix_loader::workspace_languages_file())?
+        }
+        LoadWorkspaceConfig::Always => true,
+        LoadWorkspaceConfig::Never => false,
     };
+
     if args.health {
         if let Err(err) = helix_term::health::print_health(args.health_arg, use_local_config) {
             // Piping to for example `head -10` requires special handling:

@@ -1,6 +1,6 @@
 use crate::keymap;
 use crate::keymap::{merge_keys, KeyTrie};
-use helix_loader::{merge_toml_values, trust_db};
+use helix_loader::merge_toml_values;
 use helix_view::{document::Mode, theme};
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -14,8 +14,26 @@ use toml::de::Error as TomlError;
 pub enum LoadWorkspaceConfig {
     Always,
     #[default]
-    Trusted,
+    TrustedWorkspace,
+    Manual,
     Never,
+}
+
+impl LoadWorkspaceConfig {
+    fn should_use_workspace_config(&self) -> std::io::Result<bool> {
+        Ok(match self {
+            LoadWorkspaceConfig::Manual => {
+                helix_loader::is_config_file_trusted(helix_loader::workspace_config_file())?
+            }
+            LoadWorkspaceConfig::TrustedWorkspace => {
+                helix_loader::trust_db::is_workspace_trusted(helix_core::find_workspace().0)?
+                    .unwrap_or_default()
+            }
+
+            LoadWorkspaceConfig::Always => true,
+            LoadWorkspaceConfig::Never => false,
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -41,8 +59,7 @@ impl Default for Config {
             theme: None,
             keys: keymap::default(),
             editor: helix_view::editor::Config::default(),
-            // more secure than LoadWorkspaceConfig::Always
-            load_workspace_config: LoadWorkspaceConfig::Trusted,
+            load_workspace_config: LoadWorkspaceConfig::TrustedWorkspace,
         }
     }
 }
@@ -75,18 +92,14 @@ impl Config {
     ) -> Result<Config, ConfigLoadError> {
         let global_config: Result<ConfigRaw, ConfigLoadError> =
             global.and_then(|file| toml::from_str(&file).map_err(ConfigLoadError::BadConfig));
-
-        let use_local = global_config.as_ref().is_ok_and(|c| {
-            c.load_workspace_config == Some(LoadWorkspaceConfig::Always)
-                || (c.load_workspace_config.unwrap_or_default() == LoadWorkspaceConfig::Trusted
-                    && local.as_ref().is_ok_and(|s| {
-                        trust_db::is_file_trusted(
-                            helix_loader::workspace_config_file(),
-                            s.as_str().as_bytes(),
-                        )
-                        .is_ok_and(|b| b)
-                    }))
-        });
+        let load_workspace_config = global_config
+            .as_ref()
+            .ok()
+            .and_then(|c| c.load_workspace_config)
+            .unwrap_or_default();
+        let use_local = load_workspace_config
+            .should_use_workspace_config()
+            .map_err(ConfigLoadError::Error)?;
 
         let local_config: Result<ConfigRaw, ConfigLoadError> =
             local.and_then(|file| toml::from_str(&file).map_err(ConfigLoadError::BadConfig));

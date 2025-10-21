@@ -165,6 +165,20 @@ pub fn default_log_file() -> PathBuf {
     cache_dir().join("helix.log")
 }
 
+pub fn is_config_file_trusted(path: impl AsRef<Path>) -> std::io::Result<bool> {
+    let contents = match std::fs::read_to_string(&path) {
+        Ok(c) => c,
+        Err(e) => {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                return Ok(false);
+            } else {
+                return Err(e);
+            }
+        }
+    };
+    trust_db::is_file_trusted(path, contents.as_bytes())
+}
+
 /// Merge two TOML documents, merging values from `right` onto `left`
 ///
 /// `merge_depth` sets the nesting depth up to which values are merged instead
