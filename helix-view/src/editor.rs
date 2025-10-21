@@ -2380,14 +2380,14 @@ impl Editor {
                 match prev_trust {
                     None | Some(Trust::Untrusted) => {
                         if trust_completely {
-                            self.set_status(format!("Workspace '{}' is now completely unrestricted; LSPs, debuggers, formatters and local config can be used in this workspace.", workspace.display()))
+                            self.set_status(format!("Workspace '{}' completely unrestricted; LSPs, debuggers, formatters and local config available.", workspace.display()))
                         } else {
-                            self.set_status(format!("Workspace '{}' is now unrestricted; LSPs, debuggers and formatters now be used in this workspace.", workspace.display()))
+                            self.set_status(format!("Workspace '{}' unrestricted; LSPs, debuggers and formatters available.", workspace.display()))
                         }
                     }
                     Some(Trust::Workspace { completely }) => {
                         if completely && !trust_completely {
-                            self.set_status(format!("Downgraded workspace '{}' trust to regular. Local config is no longer trusted by default. Use :config-reload to unload it.", workspace.display()));
+                            self.set_status(format!("Downgraded workspace '{}' trust to regular. Local config no longer trusted, use :config-reload to unload it.", workspace.display()));
                         } else if !completely && trust_completely {
                             self.set_status(format!(
                     "Upgraded workspace '{}' trust to completely. Use :config-reload to load local config.",
@@ -2425,18 +2425,18 @@ impl Editor {
             Ok(prev_trust) => {
                 match prev_trust {
                     None => self.set_status(format!(
-                    "Workspace '{}' is now restricted; LSPs, formatters and debuggers do not work.",
+                    "Workspace '{}' restricted; LSPs, formatters and debuggers do not work.",
                     workspace.display()
                 )),
                     Some(Trust::Workspace { completely }) => {
                         if completely {
                             self.set_status(format!(
-                    "Workspace '{}' is now restricted; use :lsp-stop to stop any running LSPs and :config-reload to unload the local config.",
+                    "Workspace '{}' restricted; use :lsp-stop to stop any running LSPs and :config-reload to unload local config.",
                               workspace.display()
                 ))
                         } else {
                             self.set_status(format!(
-                    "Workspace '{}' is now restricted; use :lsp-stop to stop any running LSP.",
+                    "Workspace '{}' restricted; use :lsp-stop to stop any running LSP.",
                     workspace.display()
                     ))
                         }
@@ -2454,6 +2454,7 @@ impl Editor {
         }
         Ok(())
     }
+
 }
 
 fn try_restore_indent(doc: &mut Document, view: &mut View) {
