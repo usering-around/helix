@@ -2408,8 +2408,9 @@ impl Editor {
 
                     _ => bail!("workspace is a file?? Report this bug"),
                 }
-
-                doc_mut!(self).is_trusted = Some(true);
+                self.documents_mut()
+                    .filter(|d| d.path().is_some_and(|p| p.starts_with(&workspace)))
+                    .for_each(|d| d.is_trusted = Some(true));
             }
         }
         Ok(())
@@ -2425,9 +2426,9 @@ impl Editor {
             Ok(prev_trust) => {
                 match prev_trust {
                     None => self.set_status(format!(
-                    "Workspace '{}' restricted; LSPs, formatters and debuggers do not work.",
-                    workspace.display()
-                )),
+                        "Workspace '{}' restricted; LSPs, formatters and debuggers do not work.",
+                        workspace.display()
+                    )),
                     Some(Trust::Workspace { completely }) => {
                         if completely {
                             self.set_status(format!(
@@ -2436,9 +2437,9 @@ impl Editor {
                 ))
                         } else {
                             self.set_status(format!(
-                    "Workspace '{}' restricted; use :lsp-stop to stop any running LSP.",
-                    workspace.display()
-                    ))
+                                "Workspace '{}' restricted; use :lsp-stop to stop any running LSP.",
+                                workspace.display()
+                            ))
                         }
                     }
 
@@ -2449,12 +2450,13 @@ impl Editor {
                     _ => bail!("workspace is a file?? Report this bug"),
                 }
 
-                doc_mut!(self).is_trusted = Some(false);
+                self.documents_mut()
+                    .filter(|d| d.path().is_some_and(|p| p.starts_with(&workspace)))
+                    .for_each(|d| d.is_trusted = Some(false));
             }
         }
         Ok(())
     }
-
 }
 
 fn try_restore_indent(doc: &mut Document, view: &mut View) {
