@@ -59,7 +59,7 @@ impl Default for Config {
             theme: None,
             keys: keymap::default(),
             editor: helix_view::editor::Config::default(),
-            load_workspace_config: LoadWorkspaceConfig::TrustedWorkspace,
+            load_workspace_config: LoadWorkspaceConfig::default(),
         }
     }
 }
