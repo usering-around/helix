@@ -44,8 +44,10 @@ impl TrustDb {
 
     fn is_workspace_trusted(&self, path: impl AsRef<Path>) -> Option<bool> {
         self.trust.as_ref().and_then(|t| {
-            t.get(path.as_ref())
-                .map(|trust| matches!(trust, Trust::Workspace { .. }))
+            path.as_ref().ancestors().find_map(|p| {
+                t.get(p)
+                    .map(|trust| matches!(trust, Trust::Workspace { .. }))
+            })
         })
     }
 
