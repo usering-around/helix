@@ -9,7 +9,7 @@ use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use sha2::Digest;
 
-use crate::{data_dir, ensure_parent_dir, find_workspace_in};
+use crate::{data_dir, ensure_parent_dir, find_workspace_in, is_workspace};
 
 #[derive(Serialize, Deserialize, Default)]
 struct TrustDb {
@@ -44,9 +44,13 @@ impl TrustDb {
 
     fn is_workspace_trusted(&self, path: impl AsRef<Path>) -> Option<bool> {
         self.trust.as_ref().and_then(|t| {
-            path.as_ref().ancestors().find_map(|p| {
-                t.get(p)
-                    .map(|trust| matches!(trust, Trust::Workspace { .. }))
+            path.as_ref().ancestors().find_map(|path| {
+                if is_workspace(path) {
+                    t.get(path)
+                        .map(|trust| matches!(trust, Trust::Workspace { .. }))
+                } else {
+                    None
+                }
             })
         })
     }
