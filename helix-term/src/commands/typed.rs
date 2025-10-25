@@ -2889,13 +2889,6 @@ fn untrust_workspace_language(
     Ok(())
 }
 
-impl ui::menu::Item for String {
-    type Data = ();
-    fn format(&self, _data: &Self::Data) -> tui::widgets::Row<'_> {
-        tui::widgets::Row::new(vec![ui::menu::Cell::from("ok")])
-    }
-}
-
 fn trust_dialog(
     cx: &mut compositor::Context,
     _args: Args,
