@@ -3,7 +3,7 @@ use std::cmp::min;
 use helix_core::doc_formatter::{DocumentFormatter, GraphemeSource, TextFormat};
 use helix_core::graphemes::Grapheme;
 use helix_core::str_utils::char_to_byte_idx;
-use helix_core::syntax::{self, HighlightEvent, Highlighter, OverlayHighlights};
+use helix_core::syntax::{self, Highlight, HighlightEvent, Highlighter, OverlayHighlights};
 use helix_core::text_annotations::TextAnnotations;
 use helix_core::{visual_offset_from_block, Position, RopeSlice};
 use helix_stdx::rope::RopeSliceExt;
@@ -95,7 +95,7 @@ pub fn render_text(
     let mut reached_view_top = false;
     let mut indent_stack: Vec<(usize, _, Style)> = Vec::new();
     let mut highlight_indent = None;
-    let mut last_rainbow_brackets = Style::new();
+    let mut last_rainbow_brackets = theme.highlight(Highlight::new(0));
 
     loop {
         let Some(mut grapheme) = formatter.next() else {
