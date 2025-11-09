@@ -93,8 +93,9 @@ pub fn render_text(
     let mut is_in_indent_area = true;
     let mut last_line_indent_level = 0;
     let mut reached_view_top = false;
-    let mut indent_stack = Vec::new();
+    let mut indent_stack: Vec<(usize, _, Style)> = Vec::new();
     let mut highlight_indent = None;
+    let mut last_rainbow_brackets = Style::new();
 
     loop {
         let Some(mut grapheme) = formatter.next() else {
@@ -127,12 +128,9 @@ pub fn render_text(
                     if last_line_indent_level != 0
                         && cursor.row == last_line_pos.visual_line as usize
                     {
-                        highlight_indent = Some((
-                            last_line_indent_level,
-                            Style::new().fg(helix_view::theme::Color::Cyan),
-                        ));
                         // highlight previous region
-                        if let Some((_, first_indent_pos)) = indent_stack.last() {
+                        if let Some((_, first_indent_pos, style)) = indent_stack.last() {
+                            highlight_indent = Some((last_line_indent_level, style.clone()));
                             for row in *first_indent_pos..last_line_pos.visual_line {
                                 renderer.draw_indent_guides(
                                     last_line_indent_level,
@@ -167,6 +165,9 @@ pub fn render_text(
         while grapheme.char_idx >= overlay_highlighter.pos {
             overlay_highlighter.advance();
         }
+        if overlay_highlighter.is_rainbow_brackets() {
+            last_rainbow_brackets = overlay_highlighter.style;
+        }
 
         let grapheme_style = if let GraphemeSource::VirtualText { highlight } = grapheme.source {
             let mut style = renderer.text_style;
@@ -197,21 +198,25 @@ pub fn render_text(
         );
         if indent_stack.is_empty() {
             for i in 0..last_line_indent_level {
-                indent_stack.push((i, last_line_pos.visual_line));
+                indent_stack.push((i, last_line_pos.visual_line, last_rainbow_brackets));
             }
         }
         if last_indent != last_line_indent_level {
             if last_indent < last_line_indent_level {
-                indent_stack.push((last_line_indent_level, last_line_pos.visual_line));
+                indent_stack.push((
+                    last_line_indent_level,
+                    last_line_pos.visual_line,
+                    last_rainbow_brackets,
+                ));
             } else {
                 if let Some((indent, _)) = highlight_indent {
                     if indent > last_line_indent_level {
                         highlight_indent = None;
                     }
                 }
-                while let Some((indent_level, line)) = indent_stack.pop() {
+                while let Some((indent_level, line, style)) = indent_stack.pop() {
                     if indent_level == last_line_indent_level {
-                        indent_stack.push((indent_level, line));
+                        indent_stack.push((indent_level, line, style));
                         break;
                     }
                 }
@@ -609,6 +614,7 @@ struct OverlayHighlighter<'t> {
     pos: usize,
     theme: &'t Theme,
     style: Style,
+    is_rainbow_brackets: bool,
 }
 
 impl<'t> OverlayHighlighter<'t> {
@@ -619,6 +625,7 @@ impl<'t> OverlayHighlighter<'t> {
             pos: 0,
             theme,
             style: Style::default(),
+            is_rainbow_brackets: false,
         };
         highlighter.update_pos();
         highlighter
@@ -628,12 +635,18 @@ impl<'t> OverlayHighlighter<'t> {
         self.pos = self.inner.next_event_offset();
     }
 
+    // not sure how accurate this is but it seems to work well enough
+    fn is_rainbow_brackets(&self) -> bool {
+        self.is_rainbow_brackets
+    }
+
     fn advance(&mut self) {
-        let (event, highlights) = self.inner.advance();
+        let (event, highlights, contains_rainbow_brackets) = self.inner.advance();
         let base = match event {
             HighlightEvent::Refresh => Style::default(),
             HighlightEvent::Push => self.style,
         };
+        self.is_rainbow_brackets = contains_rainbow_brackets;
 
         self.style = highlights.fold(base, |acc, highlight| {
             acc.patch(self.theme.highlight(highlight))
