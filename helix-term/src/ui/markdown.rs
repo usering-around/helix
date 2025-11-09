@@ -73,7 +73,7 @@ pub fn highlighted_code_block<'a>(
             }
             syntax_highlight_stack.extend(new_highlights);
         } else if pos == overlay_highlighter.next_event_offset() as u32 {
-            let (event, new_highlights) = overlay_highlighter.advance();
+            let (event, new_highlights, _) = overlay_highlighter.advance();
             if event == HighlightEvent::Refresh {
                 overlay_highlight_stack.clear();
             }

@@ -696,7 +696,7 @@ impl Syntax {
             }
         }
 
-        OverlayHighlights::Heterogenous { highlights }
+        OverlayHighlights::RainbowBrackets { highlights }
     }
 }
 
@@ -796,6 +796,9 @@ pub enum OverlayHighlights {
     Heterogenous {
         highlights: Vec<(Highlight, ops::Range<usize>)>,
     },
+    RainbowBrackets {
+        highlights: Vec<(Highlight, ops::Range<usize>)>,
+    },
 }
 
 impl OverlayHighlights {
@@ -809,7 +812,9 @@ impl OverlayHighlights {
     fn is_empty(&self) -> bool {
         match self {
             Self::Homogeneous { ranges, .. } => ranges.is_empty(),
-            Self::Heterogenous { highlights } => highlights.is_empty(),
+            Self::Heterogenous { highlights } | Self::RainbowBrackets { highlights } => {
+                highlights.is_empty()
+            }
         }
     }
 }
@@ -841,7 +846,10 @@ impl Overlay {
             OverlayHighlights::Homogeneous { highlight, ranges } => ranges
                 .get(self.idx)
                 .map(|range| (*highlight, range.clone())),
-            OverlayHighlights::Heterogenous { highlights } => highlights.get(self.idx).cloned(),
+            OverlayHighlights::Heterogenous { highlights }
+            | OverlayHighlights::RainbowBrackets { highlights } => {
+                highlights.get(self.idx).cloned()
+            }
         }
     }
 
@@ -850,10 +858,15 @@ impl Overlay {
             OverlayHighlights::Homogeneous { ranges, .. } => {
                 ranges.get(self.idx).map(|range| range.start)
             }
-            OverlayHighlights::Heterogenous { highlights } => highlights
+            OverlayHighlights::Heterogenous { highlights }
+            | OverlayHighlights::RainbowBrackets { highlights } => highlights
                 .get(self.idx)
                 .map(|(_highlight, range)| range.start),
         }
+    }
+
+    fn is_rainbow_brackets(&self) -> bool {
+        matches!(self.highlights, OverlayHighlights::RainbowBrackets { .. })
     }
 }
 
@@ -891,7 +904,7 @@ impl OverlayHighlighter {
         self.next_highlight_start.min(self.next_highlight_end)
     }
 
-    pub fn advance(&mut self) -> (HighlightEvent, impl Iterator<Item = Highlight> + '_) {
+    pub fn advance(&mut self) -> (HighlightEvent, impl Iterator<Item = Highlight> + '_, bool) {
         let mut refresh = false;
         let prev_stack_size = self
             .overlays
@@ -913,6 +926,7 @@ impl OverlayHighlighter {
             refresh = true;
         }
 
+        let mut contains_rainbow_brackets = false;
         while self.next_highlight_start == pos {
             let mut activated_idx = usize::MAX;
             for (idx, overlay) in self.overlays.iter_mut().enumerate() {
@@ -927,6 +941,9 @@ impl OverlayHighlighter {
                 // and increment the cursor position within the overlay.
                 overlay.active_highlight = Some((highlight, range.end));
                 overlay.idx += 1;
+                if overlay.is_rainbow_brackets() {
+                    contains_rainbow_brackets = true;
+                }
 
                 activated_idx = activated_idx.min(idx);
             }
@@ -973,6 +990,7 @@ impl OverlayHighlighter {
                 .flat_map(|overlay| overlay.active_highlight)
                 .map(|(highlight, _end)| highlight)
                 .skip(start),
+            contains_rainbow_brackets,
         )
     }
 }

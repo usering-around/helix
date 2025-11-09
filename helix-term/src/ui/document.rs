@@ -3,7 +3,7 @@ use std::cmp::min;
 use helix_core::doc_formatter::{DocumentFormatter, GraphemeSource, TextFormat};
 use helix_core::graphemes::Grapheme;
 use helix_core::str_utils::char_to_byte_idx;
-use helix_core::syntax::{self, HighlightEvent, Highlighter, OverlayHighlights};
+use helix_core::syntax::{self, Highlight, HighlightEvent, Highlighter, OverlayHighlights};
 use helix_core::text_annotations::TextAnnotations;
 use helix_core::{visual_offset_from_block, Position, RopeSlice};
 use helix_stdx::rope::RopeSliceExt;
@@ -38,6 +38,7 @@ pub fn render_document(
     overlay_highlights: Vec<syntax::OverlayHighlights>,
     theme: &Theme,
     decorations: DecorationManager,
+    cursor: Option<Position>,
 ) {
     let mut renderer = TextRenderer::new(
         surface,
@@ -56,6 +57,7 @@ pub fn render_document(
         overlay_highlights,
         theme,
         decorations,
+        cursor,
     )
 }
 
@@ -70,6 +72,7 @@ pub fn render_text(
     overlay_highlights: Vec<syntax::OverlayHighlights>,
     theme: &Theme,
     mut decorations: DecorationManager,
+    cursor: Option<Position>,
 ) {
     let row_off = visual_offset_from_block(text, anchor, anchor, text_fmt, text_annotations)
         .0
@@ -90,6 +93,9 @@ pub fn render_text(
     let mut is_in_indent_area = true;
     let mut last_line_indent_level = 0;
     let mut reached_view_top = false;
+    let mut indent_stack: Vec<(usize, _, Style)> = Vec::new();
+    let mut highlight_indent = None;
+    let mut last_rainbow_brackets = theme.highlight(Highlight::new(0));
 
     loop {
         let Some(mut grapheme) = formatter.next() else {
@@ -118,8 +124,29 @@ pub fn render_text(
             // initially there is no "previous" line (so doc_line is set to usize::MAX)
             // in that case we don't need to draw indent guides/virtual text
             if last_line_pos.doc_line != usize::MAX {
+                if let Some(cursor) = cursor {
+                    if last_line_indent_level != 0
+                        && cursor.row == last_line_pos.visual_line as usize
+                    {
+                        // highlight previous region
+                        if let Some((_, first_indent_pos, style)) = indent_stack.last() {
+                            highlight_indent = Some((last_line_indent_level, style.clone()));
+                            for row in *first_indent_pos..last_line_pos.visual_line {
+                                renderer.draw_indent_guides(
+                                    last_line_indent_level,
+                                    row,
+                                    highlight_indent,
+                                );
+                            }
+                        }
+                    }
+                }
                 // draw indent guides for the last line
-                renderer.draw_indent_guides(last_line_indent_level, last_line_pos.visual_line);
+                renderer.draw_indent_guides(
+                    last_line_indent_level,
+                    last_line_pos.visual_line,
+                    highlight_indent,
+                );
                 is_in_indent_area = true;
                 decorations.render_virtual_lines(renderer, last_line_pos, last_line_end)
             }
@@ -137,6 +164,9 @@ pub fn render_text(
         }
         while grapheme.char_idx >= overlay_highlighter.pos {
             overlay_highlighter.advance();
+        }
+        if overlay_highlighter.is_rainbow_brackets() {
+            last_rainbow_brackets = overlay_highlighter.style;
         }
 
         let grapheme_style = if let GraphemeSource::VirtualText { highlight } = grapheme.source {
@@ -156,6 +186,7 @@ pub fn render_text(
         };
         decorations.decorate_grapheme(renderer, &grapheme);
 
+        let last_indent = last_line_indent_level;
         let virt = grapheme.is_virtual();
         let grapheme_width = renderer.draw_grapheme(
             grapheme.raw,
@@ -165,10 +196,40 @@ pub fn render_text(
             &mut is_in_indent_area,
             grapheme.visual_pos,
         );
+        if indent_stack.is_empty() {
+            for i in 0..last_line_indent_level {
+                indent_stack.push((i, last_line_pos.visual_line, last_rainbow_brackets));
+            }
+        }
+        if last_indent != last_line_indent_level {
+            if last_indent < last_line_indent_level {
+                indent_stack.push((
+                    last_line_indent_level,
+                    last_line_pos.visual_line,
+                    last_rainbow_brackets,
+                ));
+            } else {
+                if let Some((indent, _)) = highlight_indent {
+                    if indent > last_line_indent_level {
+                        highlight_indent = None;
+                    }
+                }
+                while let Some((indent_level, line, style)) = indent_stack.pop() {
+                    if indent_level == last_line_indent_level {
+                        indent_stack.push((indent_level, line, style));
+                        break;
+                    }
+                }
+            }
+        }
         last_line_end = grapheme.visual_pos.col + grapheme_width;
     }
 
-    renderer.draw_indent_guides(last_line_indent_level, last_line_pos.visual_line);
+    renderer.draw_indent_guides(
+        last_line_indent_level,
+        last_line_pos.visual_line,
+        highlight_indent,
+    );
     decorations.render_virtual_lines(renderer, last_line_pos, last_line_end)
 }
 
@@ -390,7 +451,12 @@ impl<'a> TextRenderer<'a> {
     /// Overlay indentation guides ontop of a rendered line
     /// The indentation level is computed in `draw_lines`.
     /// Therefore this function must always be called afterwards.
-    pub fn draw_indent_guides(&mut self, indent_level: usize, mut row: u16) {
+    pub fn draw_indent_guides(
+        &mut self,
+        indent_level: usize,
+        mut row: u16,
+        highlight_indent: Option<(usize, Style)>,
+    ) {
         if !self.draw_indent_guides || self.offset.row > row as usize {
             return;
         }
@@ -403,14 +469,22 @@ impl<'a> TextRenderer<'a> {
             // indent might be a bit after offset.col
             self.offset.col + self.viewport.width as usize + (self.indent_width as usize - 1),
         ) / self.indent_width as usize;
+        let highlight_indent = highlight_indent
+            .map(|(i, style)| ((i / self.indent_width as usize).saturating_sub(1), style));
 
         for i in self.starting_indent..end_indent {
             let x = (self.viewport.x as usize + (i * self.indent_width as usize) - self.offset.col)
                 as u16;
             let y = self.viewport.y + row;
             debug_assert!(self.surface.in_bounds(x, y));
+
+            let indent_guide_style = if highlight_indent.is_some_and(|(indent, _)| indent == i) {
+                self.indent_guide_style.patch(highlight_indent.unwrap().1)
+            } else {
+                self.indent_guide_style
+            };
             self.surface
-                .set_string(x, y, &self.indent_guide_char, self.indent_guide_style);
+                .set_string(x, y, &self.indent_guide_char, indent_guide_style);
         }
     }
 
@@ -540,6 +614,7 @@ struct OverlayHighlighter<'t> {
     pos: usize,
     theme: &'t Theme,
     style: Style,
+    is_rainbow_brackets: bool,
 }
 
 impl<'t> OverlayHighlighter<'t> {
@@ -550,6 +625,7 @@ impl<'t> OverlayHighlighter<'t> {
             pos: 0,
             theme,
             style: Style::default(),
+            is_rainbow_brackets: false,
         };
         highlighter.update_pos();
         highlighter
@@ -559,12 +635,18 @@ impl<'t> OverlayHighlighter<'t> {
         self.pos = self.inner.next_event_offset();
     }
 
+    // not sure how accurate this is but it seems to work well enough
+    fn is_rainbow_brackets(&self) -> bool {
+        self.is_rainbow_brackets
+    }
+
     fn advance(&mut self) {
-        let (event, highlights) = self.inner.advance();
+        let (event, highlights, contains_rainbow_brackets) = self.inner.advance();
         let base = match event {
             HighlightEvent::Refresh => Style::default(),
             HighlightEvent::Push => self.style,
         };
+        self.is_rainbow_brackets = contains_rainbow_brackets;
 
         self.style = highlights.fold(base, |acc, highlight| {
             acc.patch(self.theme.highlight(highlight))

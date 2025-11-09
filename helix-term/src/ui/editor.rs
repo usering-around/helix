@@ -206,6 +206,7 @@ impl EditorView {
             overlays,
             theme,
             decorations,
+            editor.cursor().0,
         );
 
         // if we're not at the edge of the screen, draw a right border
